@@ -33,6 +33,12 @@ class ExtractedFact(BaseModel):
     source_type: str  # HTML, PDF, MANUAL
     page_number: Optional[int] = None
     confidence: float
+    
+    # Phase 6 tracking
+    normalized_value: Optional[str] = None
+    is_valid: bool = False
+    validation_status: str = "PENDING" # PENDING, VALIDATED, NOT_VALIDATED_REFERENCE_DATA_MISSING, NEEDS_REVIEW
+    validation_message: str = ""
 
 class ExtractionResult(BaseModel):
     facts: List[ExtractedFact] = Field(default_factory=list)

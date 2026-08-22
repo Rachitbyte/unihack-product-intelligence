@@ -18,6 +18,11 @@ class ReferenceDataService:
         self.uom_map = {}
         self.lov_data = {}
         
+        # Phase 6 tracking
+        self.manufacturers_loaded = False
+        self.uom_loaded = False
+        self.lov_loaded = False
+        
         self.load_all()
 
     def _get_path(self, filename: str) -> str:
@@ -52,6 +57,7 @@ class ReferenceDataService:
                         self.brands_map[alias] = canonical
                     else:
                         self.manufacturers_map[alias] = canonical
+            self.manufacturers_loaded = True
         except Exception as e:
             logger.error(f"Error loading {path}: {e}")
 
@@ -72,6 +78,7 @@ class ReferenceDataService:
                     canonical = row.get("canonical_uom", "").strip()
                     if raw and canonical:
                         self.uom_map[raw] = canonical
+            self.uom_loaded = True
         except Exception as e:
             logger.error(f"Error loading {path}: {e}")
 
@@ -101,6 +108,7 @@ class ReferenceDataService:
                         self.lov_data[category][attribute] = set()
                         
                     self.lov_data[category][attribute].add(allowed_val)
+            self.lov_loaded = True
         except Exception as e:
             logger.error(f"Error loading {path}: {e}")
 
