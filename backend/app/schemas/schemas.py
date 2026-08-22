@@ -45,10 +45,35 @@ class ExtractionResult(BaseModel):
     status: str = "FAILED"
     reasoning: str = ""
 
+class AssetCandidate(BaseModel):
+    url: str
+    asset_type: str  # IMAGE, DOCUMENT, VIDEO
+    filename: str = ""
+    link_text: str = ""
+    alt_text: str = ""
+    source_page_url: str = ""
+    content_type: str = ""
+
+class DigitalAsset(BaseModel):
+    asset_id: str
+    product_id: str
+    url: str
+    asset_type: str
+    classification: str
+    source_id: str
+    source_page_url: str
+    official_domain_verified: bool = False
+    confidence: float
+    status: str = "NEEDS_REVIEW" # ACCEPTED, REJECTED_NON_OFFICIAL, NEEDS_REVIEW, FAILED
+
 class GeneratedContent(BaseModel):
     marketing_description: str = ""
     short_description: str = ""
     item_features: List[str] = Field(default_factory=list)
+
+class AssetResult(BaseModel):
+    candidates: List[AssetCandidate] = Field(default_factory=list)
+    assets: List[DigitalAsset] = Field(default_factory=list)
 
 class ProductRow(BaseModel):
     mfg_part_num: Optional[str] = None
@@ -66,3 +91,4 @@ class ProductRow(BaseModel):
     retrieved_content: Optional[str] = None
     extraction: Optional[ExtractionResult] = None
     content: Optional[GeneratedContent] = None
+    asset_result: Optional[AssetResult] = None

@@ -99,6 +99,16 @@ def map_to_output(rows: List[ProductRow], headers: List[str]) -> List[Dict[str, 
                         out_row[f"ATTRIBUTE_UOM {attr_index}"] = uom
                         attr_index += 1
 
+        # 5. Digital Asset mappings
+        if row.asset_result and row.asset_result.assets:
+            for asset in row.asset_result.assets:
+                # Only output ACCEPTED official assets
+                if asset.status == "ACCEPTED" and asset.official_domain_verified:
+                    # The classification string matches the exact header from expected_output_headers
+                    # e.g. "Product Image", "Alternate Image 1", "SDS"
+                    if asset.classification in headers:
+                        out_row[asset.classification] = asset.url
+
         output_rows.append(out_row)
         
     return output_rows
