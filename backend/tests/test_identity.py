@@ -18,14 +18,17 @@ def test_identity_resolution():
         mock_response = MagicMock()
         mock_response.text = '''```json
 {
-  "resolved_manufacturer": "Freud",
-  "resolved_brand": "Diablo",
-  "resolved_product_name": "Diablo 1/2 in. x 18 in. Sanding Belt (6-Piece)",
-  "resolved_classpath": "Abrasives / Sanding Belts",
-  "confidence": 0.95,
-  "status": "VERIFIED",
-  "evidence_urls": ["https://www.diablotools.com/products/DCB518ASTS06G"],
-  "reasoning": "Official Diablo/Freud page matches MPN and Description."
+  "candidate_manufacturer": "Freud",
+  "candidate_brand": "Diablo",
+  "candidate_product_name": "Diablo 1/2 in. x 18 in. Sanding Belt (6-Piece)",
+  "candidate_classpath": "Abrasives / Sanding Belts",
+  "urls": [
+    {
+      "url": "https://www.diablotools.com/products/DCB518ASTS06G",
+      "snippet": "DCB518ASTS06G Diablo Sanding Belt",
+      "has_mpn": true
+    }
+  ]
 }
 ```'''
         # We also need to patch the GEMINI_API_KEY check in identity.py
@@ -37,18 +40,18 @@ def test_identity_resolution():
         result = identity_resolver.resolve(row)
 
     print("--- Identity Resolution Result ---")
-    print(f"Manufacturer: {result.resolved_manufacturer}")
-    print(f"Brand: {result.resolved_brand}")
-    print(f"Product: {result.resolved_product_name}")
+    print(f"Candidate Manufacturer: {result.candidate_manufacturer}")
+    print(f"Candidate Brand: {result.candidate_brand}")
+    print(f"Candidate Product: {result.candidate_product_name}")
     print(f"Confidence: {result.confidence}")
     print(f"Status: {result.status}")
-    print(f"URLs: {result.evidence_urls}")
-    print(f"Reasoning: {result.reasoning}")
+    print(f"Official URL: {result.official_source_url}")
+    print(f"Matched Evidence: {result.matched_evidence_text}")
 
     assert result.status in ["VERIFIED", "NEEDS_REVIEW", "CONFLICT", "FAILED"]
     if result.status == "VERIFIED":
         assert result.confidence > 0.8
-        assert len(result.evidence_urls) > 0
+        assert result.official_source_url != ""
 
 if __name__ == "__main__":
     test_identity_resolution()

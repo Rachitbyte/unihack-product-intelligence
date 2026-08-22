@@ -14,14 +14,15 @@ class JobResponse(BaseModel):
     created_at: datetime
 
 class IdentityResult(BaseModel):
-    resolved_manufacturer: str = ""
-    resolved_brand: str = ""
-    resolved_product_name: str = ""
-    resolved_classpath: str = ""
+    candidate_manufacturer: str = ""
+    candidate_brand: str = ""
+    candidate_product_name: str = ""
+    candidate_classpath: str = ""
+    mpn: str = ""
+    official_source_url: str = ""
+    matched_evidence_text: str = ""
     confidence: float = 0.0
     status: str = "FAILED"  # VERIFIED, NEEDS_REVIEW, CONFLICT, FAILED
-    evidence_urls: List[str] = Field(default_factory=list)
-    reasoning: str = ""
 
 class ProductRow(BaseModel):
     mfg_part_num: Optional[str] = None
@@ -36,3 +37,4 @@ class ProductRow(BaseModel):
     is_valid: bool = True
     errors: List[str] = Field(default_factory=list)
     identity: Optional[IdentityResult] = None
+    retrieved_content: Optional[str] = None
