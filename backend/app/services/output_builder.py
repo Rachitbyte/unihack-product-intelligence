@@ -22,22 +22,83 @@ def load_expected_headers() -> List[str]:
 def build_empty_output_row(headers: List[str]) -> Dict[str, Any]:
     return {header: "" for header in headers}
 
+def _split_normalized_uom(normalized_value: str):
+    """Splits '5.5 Pounds' into ('5.5', 'Pounds'). Returns (val, '') if no space."""
+    if not normalized_value:
+        return "", ""
+    parts = normalized_value.strip().split(" ", 1)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return normalized_value, ""
+
 def map_to_output(rows: List[ProductRow], headers: List[str]) -> List[Dict[str, Any]]:
     output_rows = []
+    
+    # Static mappings for known physical dimensions
+    dim_map = {
+        "weight": ("WEIGHT", "WEIGHT_UOM"),
+        "length": ("LENGTH", "LENGTH_UOM"),
+        "height": ("HEIGHT", "HEIGHT_UOM"),
+        "width": ("WIDTH", "WIDTH_UOM"),
+        "volume": ("VOLUME", "VOLUME_UOM")
+    }
+
     for row in rows:
         out_row = build_empty_output_row(headers)
         
-        # Pass-through input values according to Phase 1 logic
+        # 1. Preserve Pass-through input values
         out_row["Mfg_Part_Num"] = row.mfg_part_num or ""
         out_row["Part_Desc"] = row.part_desc or ""
         out_row["E1_Brand"] = row.e1_brand or ""
         out_row["Unilog_Brand"] = row.unilog_brand or ""
         out_row["DIB_Brand"] = row.dib_brand or ""
         out_row["Part_Manuf"] = row.part_manuf or ""
-        
-        # We could also pass them to PART_NUMBER if logic dictates, but for now just exactly to inputs
         out_row["PART_NUMBER"] = row.mfg_part_num or ""
         
+        # 2. Identity mappings
+        if row.identity:
+            out_row["MFR URL"] = row.identity.official_source_url or ""
+            out_row["MANUFACTURER_NAME"] = row.identity.candidate_manufacturer or ""
+            out_row["BRAND_NAME"] = row.identity.candidate_brand or ""
+            out_row["MANUFACTURER_PART_NUMBER"] = row.identity.mpn or ""
+            out_row["Classpath"] = row.identity.candidate_classpath or ""
+            
+        # 3. Content generation mappings
+        if row.content:
+            out_row["MARKETING_DESCRIPTION"] = row.content.marketing_description or ""
+            out_row["SHORT_DESC"] = row.content.short_description or ""
+            
+            # Map up to 20 features
+            for i, feature in enumerate(row.content.item_features):
+                if i < 20:
+                    out_row[f"ITEM_FEATURES_{i+1}"] = feature
+                    
+        # 4. Attribute mappings (Only VALIDATED or missing-ref allowed if explicitly permitted)
+        # But wait, User said: "For generated marketing/content fields, use only facts with validation_status == VALIDATED"
+        # Are NOT_VALIDATED_REFERENCE_DATA_MISSING facts allowed in output? 
+        # User said: "Invalid/unverified facts should not silently populate trusted final output fields."
+        # So we only output VALIDATED facts.
+        
+        if row.extraction and row.extraction.facts:
+            attr_index = 1
+            for fact in row.extraction.facts:
+                if not fact.is_valid or fact.validation_status != "VALIDATED":
+                    continue
+                    
+                attr_lower = fact.attribute.lower()
+                val, uom = _split_normalized_uom(fact.normalized_value)
+                
+                if attr_lower in dim_map:
+                    val_col, uom_col = dim_map[attr_lower]
+                    out_row[val_col] = val
+                    out_row[uom_col] = uom
+                else:
+                    if attr_index <= 50:
+                        out_row[f"ATTRIBUTE_LABEL {attr_index}"] = fact.attribute
+                        out_row[f"ATTRIBUTE_VALUE {attr_index}"] = val
+                        out_row[f"ATTRIBUTE_UOM {attr_index}"] = uom
+                        attr_index += 1
+
         output_rows.append(out_row)
         
     return output_rows

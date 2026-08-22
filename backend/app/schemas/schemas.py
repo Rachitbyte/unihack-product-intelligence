@@ -45,6 +45,11 @@ class ExtractionResult(BaseModel):
     status: str = "FAILED"
     reasoning: str = ""
 
+class GeneratedContent(BaseModel):
+    marketing_description: str = ""
+    short_description: str = ""
+    item_features: List[str] = Field(default_factory=list)
+
 class ProductRow(BaseModel):
     mfg_part_num: Optional[str] = None
     part_desc: Optional[str] = None
@@ -60,3 +65,4 @@ class ProductRow(BaseModel):
     identity: Optional[IdentityResult] = None
     retrieved_content: Optional[str] = None
     extraction: Optional[ExtractionResult] = None
+    content: Optional[GeneratedContent] = None
