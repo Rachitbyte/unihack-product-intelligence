@@ -24,6 +24,21 @@ class IdentityResult(BaseModel):
     confidence: float = 0.0
     status: str = "FAILED"  # VERIFIED, NEEDS_REVIEW, CONFLICT, FAILED
 
+class ExtractedFact(BaseModel):
+    attribute: str
+    raw_value: str
+    evidence_text: str
+    source_id: str
+    source_url: str
+    source_type: str  # HTML, PDF, MANUAL
+    page_number: Optional[int] = None
+    confidence: float
+
+class ExtractionResult(BaseModel):
+    facts: List[ExtractedFact] = Field(default_factory=list)
+    status: str = "FAILED"
+    reasoning: str = ""
+
 class ProductRow(BaseModel):
     mfg_part_num: Optional[str] = None
     part_desc: Optional[str] = None
@@ -38,3 +53,4 @@ class ProductRow(BaseModel):
     errors: List[str] = Field(default_factory=list)
     identity: Optional[IdentityResult] = None
     retrieved_content: Optional[str] = None
+    extraction: Optional[ExtractionResult] = None
