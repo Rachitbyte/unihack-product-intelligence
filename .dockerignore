@@ -1,0 +1,7 @@
+venv/
+__pycache__/
+.git
+frontend/
+*.db
+cache/
+*_eval_output.csv
