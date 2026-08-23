@@ -2,3 +2,14 @@
 venv/
 __pycache__/
 *.pyc
+
+# Ignore local databases and cache
+*.db
+cache/
+
+# Ignore generated output files
+*_eval_output.csv
+
+# Ignore ide/editor configs
+.vscode/
+.idea/

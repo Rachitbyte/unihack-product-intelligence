@@ -1,33 +1,44 @@
 import logging
 import uuid
 import re
+import os
+import hashlib
 import requests
 from typing import List, Dict, Tuple
 from urllib.parse import urlparse
+from diskcache import Cache
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 from app.schemas.schemas import ProductRow, AssetCandidate, DigitalAsset, AssetResult
 
+try:
+    import google.generativeai as genai
+    from google.api_core.exceptions import ResourceExhausted
+except ImportError:
+    genai = None
+    ResourceExhausted = Exception
+
 logger = logging.getLogger(__name__)
+
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "../../../cache/assets")
+os.makedirs(CACHE_DIR, exist_ok=True)
+cache = Cache(CACHE_DIR)
 
 class DigitalAssetService:
     def __init__(self):
-        # We can configure a session for HEAD requests
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         })
         
-        # Setup Gemini for ambiguous classifications
-        import os
         self.api_key = os.environ.get("GEMINI_API_KEY")
-        try:
-            import google.generativeai as genai
-            if self.api_key:
-                genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel("gemini-3.7-flash")
-            else:
-                self.model = None
-        except ImportError:
+        self.model_name = os.environ.get("GEMINI_ASSET_MODEL", "gemini-3.5-flash-lite")
+        self.max_retries = int(os.environ.get("GEMINI_MAX_RETRIES", "3"))
+        
+        if self.api_key and genai:
+            genai.configure(api_key=self.api_key)
+            self.model = genai.GenerativeModel(self.model_name)
+        else:
             self.model = None
 
     def process_assets(self, row: ProductRow, candidates: List[AssetCandidate]) -> None:
@@ -43,16 +54,13 @@ class DigitalAssetService:
                 deduped.append(c)
 
         final_assets = []
-        # Find official domain from identity
         official_domain = ""
         if row.identity and row.identity.official_source_url:
             official_domain = urlparse(row.identity.official_source_url).netloc.lower()
 
-        # Keep track of alternate image counting
         alt_image_counter = 1
 
         for candidate in deduped:
-            # 1. Enforce official domain
             is_official, final_url = self._verify_domain(candidate.url, official_domain)
             
             status = "NEEDS_REVIEW"
@@ -61,29 +69,22 @@ class DigitalAssetService:
             else:
                 status = "REJECTED_NON_OFFICIAL"
 
-            # 2. Content-Type check (for non-extension URLs or to confirm)
-            # We skip heavy network calls for unit testing by making it mockable
             content_type = self._fetch_content_type(final_url)
             candidate.content_type = content_type
 
-            # If it's a completely unsupported type (like text/html), we might skip or fail it
             if content_type and "text/html" in content_type:
-                continue # not an asset
+                continue 
 
-            # 3. Hybrid Classification
             classification, confidence = self._classify_asset(candidate)
 
-            # If classification is ambiguous and model exists, ask Gemini
             if classification == "AMBIGUOUS" and self.model:
                 classification, confidence = self._gemini_classify(candidate, row.mfg_part_num)
 
-            if classification == "AMBIGUOUS":
+            if classification == "AMBIGUOUS" or classification == "AI_QUOTA_EXCEEDED":
+                status = classification if classification == "AI_QUOTA_EXCEEDED" else "NEEDS_REVIEW"
                 classification = "Unknown Asset"
-                status = "NEEDS_REVIEW"
 
-            # 4. Image special handling (Primary vs Alternate 1-4)
             if candidate.asset_type == "IMAGE" and classification == "Product Image":
-                # Check if we already have a primary product image
                 has_primary = any(a.classification == "Product Image" for a in final_assets)
                 if has_primary:
                     if alt_image_counter <= 4:
@@ -110,28 +111,22 @@ class DigitalAssetService:
         row.asset_result = AssetResult(candidates=deduped, assets=final_assets)
 
     def _verify_domain(self, url: str, official_domain: str) -> Tuple[bool, str]:
-        # Simple domain verification
-        # Follow redirects if needed to check final host (mockable)
         try:
             parsed = urlparse(url)
             domain = parsed.netloc.lower()
             
-            # Simple match or subdomain match
             if official_domain and (official_domain in domain or domain in official_domain):
                 return True, url
                 
-            # If it's a known third-party like amazon, reject
             forbidden = ["amazon.", "ebay.", "walmart.", "homedepot."]
             if any(f in domain for f in forbidden):
                 return False, url
                 
-            return False, url # Unknown host -> rejected/review
+            return False, url
         except Exception:
             return False, url
 
     def _fetch_content_type(self, url: str) -> str:
-        # In a real heavy environment we'd use HEAD
-        # We'll rely on extension hints if we don't want to block
         ext = url.lower().split(".")[-1]
         if "pdf" in ext: return "application/pdf"
         if "jpg" in ext or "jpeg" in ext: return "image/jpeg"
@@ -141,7 +136,6 @@ class DigitalAssetService:
     def _classify_asset(self, candidate: AssetCandidate) -> Tuple[str, float]:
         text_to_search = (candidate.filename + " " + candidate.link_text + " " + candidate.alt_text).lower()
         
-        # Deterministic Rules
         if candidate.asset_type == "DOCUMENT" or "pdf" in candidate.content_type:
             if "sds" in text_to_search or "safety data" in text_to_search:
                 return "SDS", 0.95
@@ -155,14 +149,15 @@ class DigitalAssetService:
                 return "Warranty Information", 0.95
             
         elif candidate.asset_type == "IMAGE" or "image" in candidate.content_type:
-            # All valid images initially classified as Product Image; 
-            # the caller will iterate and assign Alternate Image 1-4.
             return "Product Image", 0.80
 
-        # Cannot deterministically classify
         return "AMBIGUOUS", 0.0
 
     def _gemini_classify(self, candidate: AssetCandidate, mpn: str) -> Tuple[str, float]:
+        cached = cache.get(candidate.url)
+        if cached:
+            return cached[0], cached[1]
+            
         prompt = f"""
 Classify this digital asset for product {mpn}.
 URL: {candidate.url}
@@ -193,18 +188,28 @@ Allowed Classifications for Documents:
 Respond ONLY with the exact classification name. If unknown, respond with 'Unknown Asset'.
 """
         try:
-            resp = self.model.generate_content(prompt)
-            classification = resp.text.strip()
-            # Basic validation
-            allowed = [
-                "SDS", "Warranty Information", "Catalog", "Specification Sheet",
-                "Instruction/Installation Manual", "Service Manual", "Owners/User Manual",
-                "Line Drawing", "MTR", "RoHS", "Full Engineering Drawing", "Energy Star Guide",
-                "Technical Bulletin", "Submittal", "Compatibility Chart", "Size Chart", "Product Label/Insert",
-                "Product Image", "Alternate Image 1"
-            ]
-            if classification in allowed:
-                return classification, 0.70
+            for attempt in range(self.max_retries):
+                try:
+                    resp = self.model.generate_content(prompt)
+                    classification = resp.text.strip()
+                    allowed = [
+                        "SDS", "Warranty Information", "Catalog", "Specification Sheet",
+                        "Instruction/Installation Manual", "Service Manual", "Owners/User Manual",
+                        "Line Drawing", "MTR", "RoHS", "Full Engineering Drawing", "Energy Star Guide",
+                        "Technical Bulletin", "Submittal", "Compatibility Chart", "Size Chart", "Product Label/Insert",
+                        "Product Image", "Alternate Image 1"
+                    ]
+                    if classification in allowed:
+                        cache.set(candidate.url, (classification, 0.70), expire=86400)
+                        return classification, 0.70
+                    return "AMBIGUOUS", 0.0
+                except ResourceExhausted:
+                    if attempt == self.max_retries - 1:
+                        return "AI_QUOTA_EXCEEDED", 0.0
+                    import time
+                    time.sleep(2 ** attempt)
+                except Exception:
+                    return "AMBIGUOUS", 0.0
             return "AMBIGUOUS", 0.0
         except Exception:
             return "AMBIGUOUS", 0.0

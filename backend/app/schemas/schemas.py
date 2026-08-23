@@ -12,6 +12,14 @@ class JobResponse(BaseModel):
     processed_rows: int
     failed_rows: int
     created_at: datetime
+    
+    # Tracking
+    deterministic_rows: int = 0
+    ai_required_rows: int = 0
+    ai_success_rows: int = 0
+    ai_quota_limited_rows: int = 0
+    needs_review_rows: int = 0
+    gemini_request_count: int = 0
 
 class IdentityResult(BaseModel):
     candidate_manufacturer: str = ""
@@ -22,7 +30,7 @@ class IdentityResult(BaseModel):
     official_source_url: str = ""
     matched_evidence_text: str = ""
     confidence: float = 0.0
-    status: str = "FAILED"  # VERIFIED, NEEDS_REVIEW, CONFLICT, FAILED
+    status: str = "DISCOVERY_FAILED"  # OFFICIAL_PRODUCT_PAGE_FOUND, OFFICIAL_DOCUMENT_FOUND, MANUFACTURER_FOUND_PRODUCT_NOT_FOUND, DISCOVERY_FAILED, NEEDS_REVIEW
 
 class ExtractedFact(BaseModel):
     attribute: str

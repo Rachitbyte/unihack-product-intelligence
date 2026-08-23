@@ -1,6 +1,15 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import os
+from dotenv import load_dotenv
+
+load_dotenv() # Load variables from .env if present
+
 from app.api import jobs
+from app.db.database import engine, Base
+from app.db.models import JobModel, JobRowModel
+
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="UniHack Product Intelligence (UPIE)", version="0.1.0")
 

@@ -82,7 +82,7 @@ def map_to_output(rows: List[ProductRow], headers: List[str]) -> List[Dict[str, 
         if row.extraction and row.extraction.facts:
             attr_index = 1
             for fact in row.extraction.facts:
-                if not fact.is_valid or fact.validation_status != "VALIDATED":
+                if not fact.is_valid or fact.validation_status not in ["VALIDATED", "NOT_VALIDATED_REFERENCE_DATA_MISSING"]:
                     continue
                     
                 attr_lower = fact.attribute.lower()

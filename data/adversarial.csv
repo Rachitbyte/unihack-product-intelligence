@@ -1,0 +1,7 @@
+Mfg_Part_Num,Part_Desc,E1_Brand,Unilog_Brand,DIB_Brand,Part_Manuf
+"",Missing MPN with valid description,DeWalt,,,DeWalt
+INVALID_NONSENSE,Ambiguous MPN with nonsense,,,,,
+DCB518ASTS06G,Valid MPN but missing manufacturer,,,,,
+DCB518ASTS06G,Valid MPN with invalid manufacturer clue,,,FakeManufInc,,FakeManufInc
+DCB518ASTS06G,Valid MPN but missing brand,,,,,Freud Inc
+48-22-8424,Valid Milwaukee Packout Box,,Milwaukee,,,Milwaukee

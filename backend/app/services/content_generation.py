@@ -1,19 +1,29 @@
 import json
 import logging
 import os
+import hashlib
+from diskcache import Cache
 from app.schemas.schemas import ProductRow, GeneratedContent
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
 
 try:
     import google.generativeai as genai
+    from google.api_core.exceptions import ResourceExhausted
 except ImportError:
     genai = None
+    ResourceExhausted = Exception
 
 logger = logging.getLogger(__name__)
+
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "../../../cache/content")
+os.makedirs(CACHE_DIR, exist_ok=True)
+cache = Cache(CACHE_DIR)
 
 class ContentGenerationService:
     def __init__(self):
         self.api_key = os.environ.get("GEMINI_API_KEY")
-        self.model_name = os.environ.get("GEMINI_EXTRACTION_MODEL", "gemini-3.7-flash")
+        self.model_name = os.environ.get("GEMINI_CONTENT_MODEL", "gemini-3.5-flash-lite")
+        self.max_retries = int(os.environ.get("GEMINI_MAX_RETRIES", "3"))
         
         if self.api_key and genai:
             genai.configure(api_key=self.api_key)
@@ -40,6 +50,13 @@ class ContentGenerationService:
             return GeneratedContent()
 
         facts_text = "\n".join([f"- {f.attribute}: {f.normalized_value}" for f in validated_facts])
+        
+        # Check Cache
+        content_hash = hashlib.md5(f"{row.mfg_part_num}_{facts_text}".encode()).hexdigest()
+        cached = cache.get(content_hash)
+        if cached:
+            logger.info("Cache hit for content generation")
+            return GeneratedContent(**cached)
 
         prompt = f"""
 You are an expert e-commerce copywriter.
@@ -64,31 +81,46 @@ Respond STRICTLY in JSON format:
   ]
 }}
 """
-        
         try:
-            response = self.model.generate_content(prompt)
-            text = response.text
-            
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0].strip()
-            elif "```" in text:
-                text = text.split("```")[1].split("```")[0].strip()
-                
-            data = json.loads(text)
-            
-            features = data.get("item_features", [])
-            # Backend enforcement: at most 20 features
-            if isinstance(features, list):
-                features = features[:20]
-            else:
-                features = []
-                
-            return GeneratedContent(
-                marketing_description=data.get("marketing_description", ""),
-                short_description=data.get("short_description", ""),
-                item_features=features
-            )
-            
+            for attempt in range(self.max_retries):
+                try:
+                    response = self.model.generate_content(prompt)
+                    text = response.text
+                    
+                    if "```json" in text:
+                        text = text.split("```json")[1].split("```")[0].strip()
+                    elif "```" in text:
+                        text = text.split("```")[1].split("```")[0].strip()
+                        
+                    data = json.loads(text)
+                    
+                    features = data.get("item_features", [])
+                    # Backend enforcement: at most 20 features
+                    if isinstance(features, list):
+                        features = features[:20]
+                    else:
+                        features = []
+                        
+                    res = GeneratedContent(
+                        marketing_description=data.get("marketing_description", ""),
+                        short_description=data.get("short_description", ""),
+                        item_features=features
+                    )
+                    
+                    cache.set(content_hash, res.dict(), expire=86400)
+                    return res
+                    
+                except ResourceExhausted:
+                    if attempt == self.max_retries - 1:
+                        logger.error("AI_QUOTA_EXCEEDED for content generation")
+                        return GeneratedContent()
+                    import time
+                    time.sleep(2 ** attempt)
+                except Exception as e:
+                    if attempt == self.max_retries - 1:
+                        logger.error(f"Error parsing content generation for MPN {row.mfg_part_num}: {e}")
+                        return GeneratedContent()
+                        
         except Exception as e:
             err_str = str(e)
             logger.error(f"Error generating content for MPN {row.mfg_part_num}: {err_str}")

@@ -60,11 +60,19 @@ function App() {
         body: formData
       });
       if (!uploadRes.ok) throw new Error("Failed to upload file");
-      const uploadedJob = await uploadRes.json();
-      setJob(uploadedJob);
+      let currentJob = await uploadRes.json();
+      setJob(currentJob);
       
-      // Fetch results for the table
-      await fetchJobResults(uploadedJob.id);
+      // Poll for job completion
+      while (currentJob.status === "CREATED" || currentJob.status === "PROCESSING") {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        const pollRes = await fetch(`${API_BASE}/api/jobs/${currentJob.id}`);
+        if (!pollRes.ok) break;
+        currentJob = await pollRes.json();
+        setJob(currentJob);
+        // Also fetch partial results to see live progress
+        await fetchJobResults(currentJob.id);
+      }
       
     } catch (err: any) {
       setError(err.message);

@@ -1,12 +1,19 @@
 import logging
 import requests
+import os
 from bs4 import BeautifulSoup
 from typing import Optional
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from diskcache import Cache
 from app.schemas.schemas import IdentityResult
 
 logger = logging.getLogger(__name__)
+
+# Use a local cache directory
+CACHE_DIR = os.path.join(os.path.dirname(__file__), "../../../cache/retrieval")
+os.makedirs(CACHE_DIR, exist_ok=True)
+cache = Cache(CACHE_DIR)
 
 class RetrievedSource:
     def __init__(self, url: str, content: str, status_code: int, candidates: list = None):
@@ -36,11 +43,26 @@ class SourceRetrievalService:
         }
 
     def fetch_source(self, identity: IdentityResult) -> Optional[RetrievedSource]:
-        if identity.status not in ["VERIFIED", "NEEDS_REVIEW"] or not identity.official_source_url:
+        if identity.status not in ["OFFICIAL_SOURCE_FOUND", "OFFICIAL_DOCUMENT_FOUND", "NEEDS_REVIEW", "OFFICIAL_SOURCE_BLOCKED"] or not identity.official_source_url:
             logger.info("Skipping retrieval: No valid official URL to fetch.")
             return None
 
         url = identity.official_source_url
+        
+        # Check Cache
+        cached = cache.get(url)
+        if cached:
+            logger.info(f"Cache hit for {url}")
+            # Reconstruct from cache dict
+            from app.schemas.schemas import AssetCandidate
+            candidates = [AssetCandidate(**c) for c in cached.get("candidates", [])]
+            return RetrievedSource(
+                url=url, 
+                content=cached.get("content", ""), 
+                status_code=cached.get("status_code", 200),
+                candidates=candidates
+            )
+            
         try:
             response = self.session.get(url, headers=self.headers, timeout=10)
             
@@ -69,7 +91,6 @@ class SourceRetrievalService:
                         ))
                 
                 # Extract Document Links
-                # Keep it simple: look for a hrefs ending in common doc extensions or containing keywords
                 for a in soup.find_all("a", href=True):
                     href = a.get("href")
                     full_url = urljoin(url, href)
@@ -85,21 +106,52 @@ class SourceRetrievalService:
                             source_page_url=url
                         ))
 
-                # --- Clean HTML for text extraction ---
-                for script_or_style in soup(["script", "style", "noscript", "meta"]):
-                    script_or_style.decompose()
+                # Get raw HTML for deterministic table parsing later
+                raw_html = response.text
                 
-                # Get text
-                text = soup.get_text(separator="\n", strip=True)
-                clean_text = "\n".join(line for line in text.splitlines() if line.strip())
+                # Write to Cache
+                cache.set(url, {
+                    "content": raw_html,
+                    "status_code": 200,
+                    "candidates": [c.model_dump() if hasattr(c, 'model_dump') else c.dict() for c in candidates]
+                }, expire=86400) # Cache for 1 day
                 
-                return RetrievedSource(url=url, content=clean_text, status_code=200, candidates=candidates)
+                return RetrievedSource(url=url, content=raw_html, status_code=200, candidates=candidates)
             else:
                 logger.warning(f"Failed to fetch {url}, status code: {response.status_code}")
-                return RetrievedSource(url=url, content="", status_code=response.status_code)
+                identity.status = "OFFICIAL_SOURCE_BLOCKED"
+                
+                # Try Google Cache fallback
+                try:
+                    cache_url = f"https://webcache.googleusercontent.com/search?q=cache:{url}"
+                    logger.info(f"Attempting Google Cache fallback: {cache_url}")
+                    c_resp = self.session.get(cache_url, headers=self.headers, timeout=10)
+                    if c_resp.status_code == 200:
+                        return RetrievedSource(url=url, content=c_resp.text, status_code=200)
+                except Exception as ce:
+                    logger.warning(f"Google Cache fallback failed: {ce}")
+                    
+                # Ultimate Fallback: the search snippet
+                evidence = identity.matched_evidence_text or ""
+                fallback_html = f"<html><body><h1>{identity.candidate_product_name}</h1><p>Source Blocked. Available Evidence: {evidence}</p></body></html>"
+                return RetrievedSource(url=url, content=fallback_html, status_code=response.status_code)
                 
         except Exception as e:
             logger.error(f"Error fetching {url}: {e}")
-            return RetrievedSource(url=url, content="", status_code=0)
+            identity.status = "OFFICIAL_SOURCE_BLOCKED"
+            
+            # Try Google Cache fallback
+            try:
+                cache_url = f"https://webcache.googleusercontent.com/search?q=cache:{url}"
+                logger.info(f"Attempting Google Cache fallback: {cache_url}")
+                c_resp = self.session.get(cache_url, headers=self.headers, timeout=10)
+                if c_resp.status_code == 200:
+                    return RetrievedSource(url=url, content=c_resp.text, status_code=200)
+            except Exception as ce:
+                logger.warning(f"Google Cache fallback failed: {ce}")
+                
+            evidence = getattr(identity, "matched_evidence_text", "") or ""
+            fallback_html = f"<html><body><h1>{identity.candidate_product_name}</h1><p>Source Blocked (Timeout). Available Evidence: {evidence}</p></body></html>"
+            return RetrievedSource(url=url, content=fallback_html, status_code=0)
 
 retrieval_service = SourceRetrievalService()
