@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import './App.css';
 import JobProgress from './components/JobProgress';
 import ResultsTable from './components/ResultsTable';
@@ -21,8 +21,27 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<ProductRow[]>([]);
   const [selectedRow, setSelectedRow] = useState<ProductRow | null>(null);
+  const [healthStatus, setHealthStatus] = useState<string>("Checking API connection...");
 
   const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+  useEffect(() => {
+    const checkHealth = async () => {
+      try {
+        console.log(`Checking API health at: ${API_BASE}/health`);
+        const res = await fetch(`${API_BASE}/health`);
+        if (res.ok) {
+          const data = await res.json();
+          setHealthStatus(`Connected to backend (${API_BASE}) - Status: ${data.status}`);
+        } else {
+          setHealthStatus(`Failed to connect to backend (${API_BASE}) - HTTP ${res.status}`);
+        }
+      } catch (err: any) {
+        setHealthStatus(`Error connecting to backend (${API_BASE}): ${err.message}`);
+      }
+    };
+    checkHealth();
+  }, []);
 
   const fetchJobResults = async (jobId: string) => {
     try {
@@ -94,6 +113,9 @@ function App() {
       <header>
         <h1>UniHack Product Intelligence</h1>
         <p style={{ color: 'var(--text-secondary)' }}>AI-Powered E-Commerce Data Enrichment</p>
+        <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', color: healthStatus.includes('Connected') ? 'var(--status-official)' : 'var(--status-conflict)' }}>
+          {healthStatus}
+        </div>
       </header>
       
       <main style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>

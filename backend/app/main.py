@@ -42,9 +42,12 @@ except Exception as e:
 
 app = FastAPI(title="UniHack Product Intelligence (UPIE)", version="0.1.0")
 
+origins_env = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173,https://unihack-product-intelligence.vercel.app")
+allow_origins = [origin.strip() for origin in origins_env.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
