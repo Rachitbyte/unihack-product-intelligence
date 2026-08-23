@@ -100,12 +100,30 @@ function App() {
     }
   };
 
+  const downloadFile = async (url: string, filename: string) => {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`Download failed: ${res.statusText}`);
+      const blob = await res.blob();
+      const urlBlob = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = urlBlob;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(urlBlob);
+    } catch (err: any) {
+      setError(`Download Error: ${err.message}`);
+    }
+  };
+
   const downloadCSV = () => {
-    if (job) window.open(`${API_BASE}/api/jobs/${job.id}/download/csv`, '_blank');
+    if (job) downloadFile(`${API_BASE}/api/jobs/${job.id}/download/csv`, `job_${job.id}_output.csv`);
   };
 
   const downloadXLSX = () => {
-    if (job) window.open(`${API_BASE}/api/jobs/${job.id}/download/xlsx`, '_blank');
+    if (job) downloadFile(`${API_BASE}/api/jobs/${job.id}/download/xlsx`, `job_${job.id}_output.xlsx`);
   };
 
   return (
