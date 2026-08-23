@@ -121,18 +121,21 @@ def process_job_background(job_id: str):
 
 @router.post("", response_model=JobResponse)
 def create_job(db: Session = Depends(get_db)):
-    job_id = str(uuid.uuid4())
-    new_job = JobModel(
-        id=job_id,
-        status="CREATED",
-        total_rows=0,
-        processed_rows=0,
-        failed_rows=0,
-        errors=[]
-    )
-    db.add(new_job)
-    db.commit()
-    db.refresh(new_job)
+    try:
+        job_id = str(uuid.uuid4())
+        new_job = JobModel(
+            id=job_id,
+            status="CREATED",
+            total_rows=0,
+            processed_rows=0,
+            failed_rows=0,
+            errors=[]
+        )
+        db.add(new_job)
+        db.commit()
+        db.refresh(new_job)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"DB Error: {str(e)}")
     
     return JobResponse(
         id=new_job.id,
